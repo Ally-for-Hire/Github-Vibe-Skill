@@ -52,6 +52,13 @@ TOOL_INSTALL_HINTS: dict[str, str] = {
     "npm": "install Node.js from https://nodejs.org/ (includes npm)",
 }
 
+WINDOWS_TOOL_PATHS: dict[str, tuple[Path, ...]] = {
+    "gh": (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "GitHub CLI" / "gh.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "GitHub CLI" / "gh.exe",
+    ),
+}
+
 
 @dataclass(frozen=True)
 class ScaffoldConfig:
@@ -166,12 +173,27 @@ def quote_arg(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def require_tool(name: str) -> None:
-    """Raise RuntimeError with an install hint if `name` is not on PATH."""
-    if shutil.which(name) is None:
-        hint = TOOL_INSTALL_HINTS.get(name)
-        suffix = f" - {hint}" if hint else ""
-        raise RuntimeError(f"required CLI not found on PATH: {name}{suffix}")
+def tool_path(name: str) -> str | None:
+    """Return an executable path, including common Windows install locations."""
+    found = shutil.which(name)
+    if found:
+        return found
+
+    for candidate in WINDOWS_TOOL_PATHS.get(name, ()):
+        if candidate and candidate.exists():
+            return str(candidate)
+    return None
+
+
+def require_tool(name: str) -> str:
+    """Return a CLI executable path, or raise with an install hint."""
+    found = tool_path(name)
+    if found:
+        return found
+
+    hint = TOOL_INSTALL_HINTS.get(name)
+    suffix = f" - {hint}" if hint else ""
+    raise RuntimeError(f"required CLI not found on PATH or known install paths: {name}{suffix}")
 
 
 def run_command(
@@ -203,27 +225,25 @@ def run_command(
 
 
 def ensure_git_repo(output_dir: Path, dry_run: bool) -> None:
-    if not dry_run:
-        require_tool("git")
+    git = "git" if dry_run else require_tool("git")
     if (output_dir / ".git").exists():
         return
-    run_command(["git", "init", "-b", "main"], cwd=output_dir, dry_run=dry_run)
-    run_command(["git", "add", "."], cwd=output_dir, dry_run=dry_run)
+    run_command([git, "init", "-b", "main"], cwd=output_dir, dry_run=dry_run)
+    run_command([git, "add", "."], cwd=output_dir, dry_run=dry_run)
     run_command(
-        ["git", "commit", "-m", "Initial Cloudflare Worker scaffold"],
+        [git, "commit", "-m", "Initial Cloudflare Worker scaffold"],
         cwd=output_dir,
         dry_run=dry_run,
     )
 
 
 def create_github_repo(config: ScaffoldConfig, visibility: str, dry_run: bool) -> None:
-    if not dry_run:
-        require_tool("gh")
+    gh = "gh" if dry_run else require_tool("gh")
     ensure_git_repo(config.output_dir, dry_run)
-    run_command(["gh", "auth", "status", "--active"], dry_run=dry_run)
+    run_command([gh, "auth", "status", "--active"], dry_run=dry_run)
     run_command(
         [
-            "gh",
+            gh,
             "repo",
             "create",
             config.repo_slug,
@@ -245,9 +265,9 @@ def resolve_secret_repo(config: ScaffoldConfig, output_dir: Path, dry_run: bool)
     if dry_run:
         return f"OWNER/{config.repo_name}"
 
-    require_tool("gh")
+    gh = require_tool("gh")
     completed = subprocess.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+        [gh, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
         cwd=str(output_dir),
         text=True,
         check=True,
@@ -284,12 +304,11 @@ def set_github_secrets(config: ScaffoldConfig, environment: str | None, dry_run:
     `input_text` arg on `run_command`) so it never appears in argv,
     shell history, or `ps` output.
     """
-    if not dry_run:
-        require_tool("gh")
+    gh = "gh" if dry_run else require_tool("gh")
     repo = resolve_secret_repo(config, config.output_dir, dry_run)
     for name in SECRET_NAMES:
         value = "redacted" if dry_run else read_secret_value(name)
-        command = ["gh", "secret", "set", name, "--app", "actions", "--repo", repo]
+        command = [gh, "secret", "set", name, "--app", "actions", "--repo", repo]
         if environment:
             command.extend(["--env", environment])
         run_command(command, input_text=value, dry_run=dry_run)
@@ -325,7 +344,7 @@ def run_doctor(stream=None) -> int:
     line("")
     line("Required CLIs:")
     for tool in ("git", "gh", "node", "npm"):
-        path = shutil.which(tool)
+        path = tool_path(tool)
         if path:
             line(f"  {tool:6s} OK    {path}")
         else:
@@ -337,12 +356,13 @@ def run_doctor(stream=None) -> int:
 
     line("")
     line("GitHub auth:")
-    if shutil.which("gh") is None:
+    gh = tool_path("gh")
+    if gh is None:
         line("  skipped (gh not installed)")
     else:
         try:
             subprocess.run(
-                ["gh", "auth", "status", "--active"],
+                [gh, "auth", "status", "--active"],
                 check=True,
                 capture_output=True,
                 text=True,

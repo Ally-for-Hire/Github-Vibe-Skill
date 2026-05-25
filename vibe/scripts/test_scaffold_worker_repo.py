@@ -210,7 +210,8 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
         self.assertEqual(quote(""), "''")
 
     def test_require_tool_includes_install_hint(self):
-        with mock.patch.object(self.module.shutil, "which", return_value=None):
+        with mock.patch.object(self.module.shutil, "which", return_value=None), \
+             mock.patch.dict(self.module.WINDOWS_TOOL_PATHS, {"gh": ()}):
             with self.assertRaises(RuntimeError) as ctx:
                 self.module.require_tool("gh")
         message = str(ctx.exception)
@@ -219,7 +220,14 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
 
     def test_require_tool_succeeds_when_tool_present(self):
         with mock.patch.object(self.module.shutil, "which", return_value="/usr/bin/git"):
-            self.module.require_tool("git")  # no raise
+            self.assertEqual(self.module.require_tool("git"), "/usr/bin/git")
+
+    def test_tool_path_falls_back_to_known_windows_location(self):
+        fake_path = Path("C:/Program Files/GitHub CLI/gh.exe")
+        with mock.patch.object(self.module.shutil, "which", return_value=None), \
+             mock.patch.dict(self.module.WINDOWS_TOOL_PATHS, {"gh": (fake_path,)}), \
+             mock.patch.object(Path, "exists", return_value=True):
+            self.assertEqual(self.module.tool_path("gh"), str(fake_path))
 
     def test_read_secret_value_prefers_environment(self):
         with mock.patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": "from-env"}, clear=False):
@@ -263,7 +271,8 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
                 return None
             return original_which(name, *args, **kwargs)
 
-        with mock.patch.object(self.module.shutil, "which", side_effect=fake_which):
+        with mock.patch.object(self.module.shutil, "which", side_effect=fake_which), \
+             mock.patch.dict(self.module.WINDOWS_TOOL_PATHS, {"gh": ()}):
             result = self.module.run_doctor(stream=buffer)
 
         output = buffer.getvalue()
