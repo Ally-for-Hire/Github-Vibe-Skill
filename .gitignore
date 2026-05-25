@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp-vibe-worker-test-*/
+demo-out/
+node_modules/
+dist/
+.wrangler/
+.env
+.env.*
+!.env.example

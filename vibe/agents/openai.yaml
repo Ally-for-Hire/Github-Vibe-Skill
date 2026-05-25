@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vibe"
+  short_description: "Create GitHub repos with secure Cloudflare Workers deployment"
+  default_prompt: "Create a GitHub repository scaffold with GitHub Actions that deploys securely to Cloudflare Workers."
