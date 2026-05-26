@@ -54,6 +54,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify Cloudflare credentials
+        if: env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          npx wrangler whoami || {
+            echo "::error::Cloudflare authentication failed. Re-run the vibe secret setup command with a valid account ID and Workers API token."
+            exit 1
+          }
+
       - name: Deploy with Wrangler
         if: env.CLOUDFLARE_ACCOUNT_ID != '' && env.CLOUDFLARE_API_TOKEN != ''
         run: npm run deploy
