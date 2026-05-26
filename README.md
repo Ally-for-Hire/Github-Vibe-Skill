@@ -73,7 +73,7 @@ After installing GitHub CLI:
 ```powershell
 gh auth login
 gh auth status --active
-gh repo create OWNER/Github-Vibe-Skill --private --source . --remote origin --push
+gh repo create OWNER/Github-Vibe-Skill --public --source . --remote origin --push
 ```
 
 For a live throwaway deployment test:
