@@ -37,7 +37,9 @@ In CI those are read from GitHub Actions secrets. Locally, export them in your s
 
 ## GitHub Actions
 
-`.github/workflows/deploy.yml` runs tests, typecheck, and a dry-run compile on every push. The `deploy` job runs only on `main` and is gated by the `production` environment, so you can add reviewers or branch protection through the repo settings.
+`.github/workflows/deploy.yml` runs `npm run check` on every push. The `deploy` job runs only on `main` and is gated by the `production` environment, so you can add reviewers or branch protection through the repo settings.
+
+If Cloudflare secrets are not set, the deploy job skips deployment cleanly. If secrets are set, the workflow runs `npx wrangler whoami` before deploy so bad account IDs or tokens fail with a clear preflight error.
 
 ## Runtime secrets
 

@@ -49,10 +49,13 @@ For an end-to-end generated Worker check:
 ```bash
 python vibe/scripts/scaffold_worker_repo.py owner/test-worker --output ../test-worker
 cd ../test-worker
-npm ci
-npm test
-npm run typecheck
-npm run deploy:dry-run
+npm run check
+```
+
+To install, validate, and start the local dev server in one command:
+
+```bash
+npm run vibe
 ```
 
 ## Publish Locally
