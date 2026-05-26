@@ -475,8 +475,7 @@ def print_next_steps(config: ScaffoldConfig, args: argparse.Namespace) -> None:
     print("")
     print("Next steps:")
     print(f"  cd {config.output_dir}")
-    print("  npm ci")
-    print("  npm test && npm run typecheck && npm run deploy:dry-run")
+    print("  npm run vibe")
     if not args.create_github_repo:
         print("  # then, when ready:")
         print(f"  gh repo create {config.repo_slug} --{args.visibility} --source . --remote origin --push")

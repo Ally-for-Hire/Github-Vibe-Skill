@@ -4,7 +4,19 @@ Cloudflare Worker scaffolded from the `vibe` skill. Deploys from GitHub Actions 
 
 ## Local development
 
+One command does the full local path: install dependencies, run tests,
+typecheck, compile with Wrangler dry-run, then start the dev server.
+
 ```bash
+npm run vibe
+```
+
+Open <http://127.0.0.1:8787/> after Wrangler starts.
+
+Useful individual commands:
+
+```bash
+npm run check       # install + test + typecheck + wrangler dry-run
 npm ci
 npm test            # vitest
 npm run typecheck   # tsc --noEmit
