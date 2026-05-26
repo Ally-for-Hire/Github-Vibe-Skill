@@ -11,9 +11,9 @@ python vibe/scripts/scaffold_worker_repo.py --doctor
 ```
 
 `--doctor` reports Python version, required CLIs (`git`, `gh`, `node`, `npm`),
-GitHub auth status, presence of Cloudflare env vars, and template file
-integrity. Exit code is 0 only if everything passes; paste the full output
-into a bug report when escalating.
+GitHub auth status, Git commit identity, presence of Cloudflare env vars, and
+template file integrity. Exit code is 0 only if everything passes; paste the
+full output into a bug report when escalating.
 
 ## Agent escalation rules
 
@@ -63,9 +63,20 @@ never accepted as a CLI argument by design.
 **Cause:** You asked to skip scaffolding but did not ask to set secrets.
 **Fix:** add `--set-secrets`, or drop `--secrets-only` to regenerate files.
 
+### `error: --set-secrets requires OWNER/NAME ...`
+**Cause:** GitHub secrets need an explicit remote target. A bare repo name
+can be ambiguous before the repo has an origin. **Fix:** use
+`OWNER/my-worker --set-secrets`.
+
 ### CalledProcessError from `gh auth status --active`
 **Cause:** No active GitHub account. **Fix:** `gh auth login`. Verify with
 `gh auth status --active` (the script never uses `--show-token`).
+
+### CalledProcessError from `git commit`
+**Cause:** Git is installed but `user.name` or `user.email` is not configured.
+**Fix:** run `git config --global user.name "Your Name"` and
+`git config --global user.email "you@example.com"`, then re-run the scaffold
+command. `--doctor` reports both settings.
 
 ### CalledProcessError from `gh repo create`
 **Cause:** Repo already exists, name collision in your account, insufficient

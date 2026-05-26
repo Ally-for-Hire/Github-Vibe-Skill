@@ -40,7 +40,8 @@ The generator never accepts `CLOUDFLARE_API_TOKEN` as a command-line argument. I
 
 ```bash
 python -m unittest vibe/scripts/test_scaffold_worker_repo.py
-python C:/Users/dabes/.codex/skills/.system/skill-creator/scripts/quick_validate.py ./vibe
+# Optional, when Codex's skill-creator validator is available locally:
+python path/to/quick_validate.py ./vibe
 python vibe/scripts/scaffold_worker_repo.py --doctor
 ```
 
@@ -82,6 +83,5 @@ gh repo create OWNER/Github-Vibe-Skill --public --source . --remote origin --pus
 For a live throwaway deployment test:
 
 ```powershell
-python vibe/scripts/scaffold_worker_repo.py OWNER/vibe-worker-test --output ../vibe-worker-test --create-github-repo
-python vibe/scripts/scaffold_worker_repo.py OWNER/vibe-worker-test --output ../vibe-worker-test --set-secrets --secrets-only
+python vibe/scripts/scaffold_worker_repo.py OWNER/vibe-worker-test --output ../vibe-worker-test --create-github-repo --set-secrets
 ```

@@ -29,7 +29,6 @@ Run `python scaffold_worker_repo.py --doctor` for an environment check.
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import getpass
 import os
 import re
@@ -43,7 +42,10 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = SKILL_DIR / "assets" / "worker-template"
 DEFAULT_NODE_VERSION = "24"
+DEFAULT_COMPATIBILITY_DATE = "2026-05-25"
 SECRET_NAMES = ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN")
+OWNER_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 TOOL_INSTALL_HINTS: dict[str, str] = {
     "git": "install from https://git-scm.com/downloads",
@@ -92,7 +94,23 @@ def split_repo_slug(slug: str) -> tuple[str | None, str]:
     return owner, repo
 
 
+def validate_repo_slug(slug: str) -> None:
+    """Reject slugs that GitHub CLI will not accept cleanly."""
+    owner, repo = split_repo_slug(slug)
+    if owner and not OWNER_PATTERN.fullmatch(owner):
+        raise ValueError(
+            "repository owner must use GitHub-compatible characters "
+            "(letters, numbers, and hyphens; no leading/trailing hyphen)"
+        )
+    if not REPO_PATTERN.fullmatch(repo) or repo in {".", ".."} or repo.endswith(".git"):
+        raise ValueError(
+            "repository name must be 1-100 characters using letters, numbers, "
+            "dots, underscores, or hyphens"
+        )
+
+
 def build_config(args: argparse.Namespace) -> ScaffoldConfig:
+    validate_repo_slug(args.repo)
     _, raw_repo_name = split_repo_slug(args.repo)
     repo_name = normalize_name(raw_repo_name)
     worker_name = normalize_name(args.worker_name or repo_name)
@@ -228,7 +246,11 @@ def ensure_git_repo(output_dir: Path, dry_run: bool) -> None:
     git = "git" if dry_run else require_tool("git")
     if (output_dir / ".git").exists():
         return
-    run_command([git, "init", "-b", "main"], cwd=output_dir, dry_run=dry_run)
+    try:
+        run_command([git, "init", "-b", "main"], cwd=output_dir, dry_run=dry_run)
+    except subprocess.CalledProcessError:
+        run_command([git, "init"], cwd=output_dir, dry_run=dry_run)
+        run_command([git, "symbolic-ref", "HEAD", "refs/heads/main"], cwd=output_dir, dry_run=dry_run)
     run_command([git, "add", "."], cwd=output_dir, dry_run=dry_run)
     run_command(
         [git, "commit", "-m", "Initial Cloudflare Worker scaffold"],
@@ -237,43 +259,36 @@ def ensure_git_repo(output_dir: Path, dry_run: bool) -> None:
     )
 
 
-def create_github_repo(config: ScaffoldConfig, visibility: str, dry_run: bool) -> None:
+def create_github_repo(config: ScaffoldConfig, visibility: str, dry_run: bool, *, push: bool = True) -> None:
     gh = "gh" if dry_run else require_tool("gh")
     ensure_git_repo(config.output_dir, dry_run)
     run_command([gh, "auth", "status", "--active"], dry_run=dry_run)
-    run_command(
-        [
-            gh,
-            "repo",
-            "create",
-            config.repo_slug,
-            f"--{visibility}",
-            "--source",
-            str(config.output_dir),
-            "--remote",
-            "origin",
-            "--push",
-        ],
-        dry_run=dry_run,
-    )
+    command = [
+        gh,
+        "repo",
+        "create",
+        config.repo_slug,
+        f"--{visibility}",
+        "--source",
+        str(config.output_dir),
+        "--remote",
+        "origin",
+    ]
+    if push:
+        command.append("--push")
+    run_command(command, dry_run=dry_run)
+
+
+def push_github_repo(config: ScaffoldConfig, dry_run: bool) -> None:
+    git = "git" if dry_run else require_tool("git")
+    run_command([git, "push", "-u", "origin", "main"], cwd=config.output_dir, dry_run=dry_run)
 
 
 def resolve_secret_repo(config: ScaffoldConfig, output_dir: Path, dry_run: bool) -> str:
     owner, _ = split_repo_slug(config.repo_slug)
     if owner:
         return config.repo_slug
-    if dry_run:
-        return f"OWNER/{config.repo_name}"
-
-    gh = require_tool("gh")
-    completed = subprocess.run(
-        [gh, "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        cwd=str(output_dir),
-        text=True,
-        check=True,
-        capture_output=True,
-    )
-    return completed.stdout.strip()
+    raise RuntimeError("--set-secrets requires an OWNER/NAME repository slug")
 
 
 def read_secret_value(name: str) -> str:
@@ -285,12 +300,15 @@ def read_secret_value(name: str) -> str:
     """
     value = os.environ.get(name)
     if value:
-        return value
+        value = value.strip()
+        if value:
+            return value
 
     if name == "CLOUDFLARE_API_TOKEN":
         value = getpass.getpass(f"{name}: ")
     else:
         value = input(f"{name}: ")
+    value = value.strip()
 
     if not value:
         raise RuntimeError(f"{name} cannot be empty")
@@ -305,6 +323,7 @@ def set_github_secrets(config: ScaffoldConfig, environment: str | None, dry_run:
     shell history, or `ps` output.
     """
     gh = "gh" if dry_run else require_tool("gh")
+    run_command([gh, "auth", "status", "--active"], dry_run=dry_run)
     repo = resolve_secret_repo(config, config.output_dir, dry_run)
     for name in SECRET_NAMES:
         value = "redacted" if dry_run else read_secret_value(name)
@@ -338,7 +357,11 @@ def run_doctor(stream=None) -> int:
 
     line("vibe doctor")
     line("=" * 40)
+    python_ok = sys.version_info >= (3, 10)
     line(f"python:   {sys.version.split()[0]} ({sys.platform})")
+    if not python_ok:
+        line("          needs Python 3.10+")
+        issues.append("Python 3.10+ required")
     line(f"skill dir: {SKILL_DIR}")
 
     line("")
@@ -378,6 +401,27 @@ def run_doctor(stream=None) -> int:
         except FileNotFoundError:
             line("  gh not on PATH (race?)")
             issues.append("gh not on PATH")
+
+    line("")
+    line("Git identity:")
+    git = tool_path("git")
+    if git is None:
+        line("  skipped (git not installed)")
+    else:
+        version = subprocess.run([git, "--version"], capture_output=True, text=True)
+        line(f"  {version.stdout.strip() or 'version unknown'}")
+        for key in ("user.name", "user.email"):
+            completed = subprocess.run(
+                [git, "config", "--global", "--get", key],
+                capture_output=True,
+                text=True,
+            )
+            value = completed.stdout.strip()
+            if value:
+                line(f"  {key:10s} set")
+            else:
+                line(f"  {key:10s} MISSING")
+                issues.append(f"git config missing: {key}")
 
     line("")
     line("Cloudflare env vars (presence only, values not displayed):")
@@ -435,7 +479,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--compatibility-date",
-        default=dt.date.today().isoformat(),
+        default=DEFAULT_COMPATIBILITY_DATE,
         help="Wrangler compatibility_date value.",
     )
     parser.add_argument("--node-version", default=DEFAULT_NODE_VERSION, help="Node.js version for GitHub Actions.")
@@ -465,6 +509,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("repo is required unless --doctor is used")
     if args.secrets_only and not args.set_secrets:
         parser.error("--secrets-only requires --set-secrets")
+    try:
+        validate_repo_slug(args.repo)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.set_secrets and split_repo_slug(args.repo)[0] is None:
+        parser.error("--set-secrets requires OWNER/NAME so secrets target an explicit repository")
     if args.output is None:
         _, repo_name = split_repo_slug(args.repo)
         args.output = normalize_name(repo_name)
@@ -472,6 +522,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def print_next_steps(config: ScaffoldConfig, args: argparse.Namespace) -> None:
+    owner, _ = split_repo_slug(config.repo_slug)
+    secrets_repo = config.repo_slug if owner else f"OWNER/{config.repo_name}"
     print("")
     print("Next steps:")
     print(f"  cd {config.output_dir}")
@@ -484,7 +536,7 @@ def print_next_steps(config: ScaffoldConfig, args: argparse.Namespace) -> None:
         print(
             "  "
             + script_command(
-                config.repo_slug,
+                secrets_repo,
                 "--output",
                 str(config.output_dir),
                 "--set-secrets",
@@ -516,10 +568,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {len(written)} files to {config.output_dir}")
 
         if args.create_github_repo:
-            create_github_repo(config, args.visibility, args.dry_run)
+            create_github_repo(config, args.visibility, args.dry_run, push=not args.set_secrets)
 
         if args.set_secrets:
             set_github_secrets(config, args.environment_secrets, args.dry_run)
+
+        if args.create_github_repo and args.set_secrets:
+            push_github_repo(config, args.dry_run)
 
         print_next_steps(config, args)
 

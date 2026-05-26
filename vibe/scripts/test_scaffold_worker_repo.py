@@ -27,7 +27,7 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
 
     def _config(self, output_dir: Path, **overrides):
         defaults = dict(
-            repo_slug="owner/My App",
+            repo_slug="owner/my-app",
             repo_name="my-app",
             worker_name="my-worker",
             output_dir=output_dir,
@@ -60,10 +60,13 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
             self.assertIn('"compatibility_date": "2026-05-25"', wrangler_jsonc)
             self.assertIn("CLOUDFLARE_API_TOKEN", workflow)
             self.assertIn("npm run check", workflow)
+            self.assertIn("steps.cloudflare-secrets.outputs.ready", workflow)
+            self.assertNotIn("env:\n      CLOUDFLARE_ACCOUNT_ID", workflow)
+            self.assertIn("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", workflow)
             self.assertIn('node-version: "24"', workflow)
             self.assertIn('service: "my-worker"', response_ts)
             self.assertIn("# my-app", readme)
-            self.assertIn("owner/My App", readme)
+            self.assertIn("owner/my-app", readme)
             self.assertNotIn("vibe-worker-template", package_json)
             self.assertNotIn("vibe-worker-template", package_lock)
             self.assertNotIn("__WORKER_NAME__", response_ts)
@@ -81,8 +84,9 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
                 self.module.scaffold_files(config)
 
             forced = self._config(output_dir, force=True)
+            (output_dir / "package.json").write_text('{"name":"old"}', encoding="utf-8")
             self.module.scaffold_files(forced)
-            self.assertTrue((output_dir / "package.json").exists())
+            self.assertIn('"name": "my-app"', (output_dir / "package.json").read_text(encoding="utf-8"))
             self.assertEqual((output_dir / "existing.txt").read_text(encoding="utf-8"), "keep me")
 
     def test_split_repo_slug_rejects_bad_input(self):
@@ -94,6 +98,16 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
             self.module.split_repo_slug("/repo")
         with self.assertRaises(ValueError):
             self.module.split_repo_slug("a/b/c")
+
+    def test_validate_repo_slug_rejects_live_unsafe_names(self):
+        self.module.validate_repo_slug("owner/repo")
+        self.module.validate_repo_slug("owner/repo.name_1")
+        with self.assertRaises(ValueError):
+            self.module.validate_repo_slug("owner/My App")
+        with self.assertRaises(ValueError):
+            self.module.validate_repo_slug("-owner/repo")
+        with self.assertRaises(ValueError):
+            self.module.validate_repo_slug("owner/repo.git")
 
     def test_normalize_name(self):
         self.assertEqual(self.module.normalize_name("My Worker_API"), "my-worker-api")
@@ -130,8 +144,10 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
 
             output = buffer.getvalue()
             self.assertIn("gh repo create owner/dry-run", output)
+            self.assertNotIn("--push", output.split("gh secret set CLOUDFLARE_ACCOUNT_ID", 1)[0])
             self.assertIn("gh secret set CLOUDFLARE_ACCOUNT_ID", output)
             self.assertIn("gh secret set CLOUDFLARE_API_TOKEN", output)
+            self.assertLess(output.index("gh secret set CLOUDFLARE_API_TOKEN"), output.index("git push -u origin main"))
             self.assertIn("<redacted-stdin>", output)
             self.assertIn("Next steps:", output)
 
@@ -234,8 +250,31 @@ class ScaffoldWorkerRepoTests(unittest.TestCase):
             self.assertEqual(self.module.tool_path("gh"), str(fake_path))
 
     def test_read_secret_value_prefers_environment(self):
-        with mock.patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": "from-env"}, clear=False):
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": " from-env\n"}, clear=False):
             self.assertEqual(self.module.read_secret_value("CLOUDFLARE_ACCOUNT_ID"), "from-env")
+
+    def test_set_secrets_requires_explicit_owner_repo(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir), repo_slug="bare-repo", repo_name="bare-repo")
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(RuntimeError):
+                    self.module.set_github_secrets(config, None, dry_run=True)
+
+    def test_set_secrets_checks_gh_auth_before_reading_token(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = self._config(Path(temp_dir))
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+
+            with mock.patch.object(self.module, "run_command", side_effect=fake_run), \
+                 mock.patch.object(self.module, "require_tool", return_value="gh"), \
+                 mock.patch.object(self.module, "read_secret_value", return_value="secret") as read_secret:
+                self.module.set_github_secrets(config, None, dry_run=False)
+
+            self.assertEqual(calls[0], ["gh", "auth", "status", "--active"])
+            self.assertEqual(read_secret.call_count, 2)
 
     def test_read_secret_value_rejects_empty_prompt(self):
         env = {k: v for k, v in os.environ.items() if k != "CLOUDFLARE_API_TOKEN"}

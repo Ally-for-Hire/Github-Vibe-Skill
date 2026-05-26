@@ -35,11 +35,15 @@ npm run deploy:dry-run  # compile + validate without uploading
 
 In CI those are read from GitHub Actions secrets. Locally, export them in your shell; never commit them or paste into chat.
 
+`wrangler.jsonc` has `workers_dev` enabled so the Worker gets a public `workers.dev` URL after deployment. Set it to `false` and configure Cloudflare routes if this Worker should not be reachable on that default subdomain.
+
 ## GitHub Actions
 
-`.github/workflows/deploy.yml` runs `npm run check` on every push. The `deploy` job runs only on `main` and is gated by the `production` environment, so you can add reviewers or branch protection through the repo settings.
+`.github/workflows/deploy.yml` runs `npm run check` on every push. The `deploy` job runs only on `main` and uses the `production` environment. GitHub creates that environment without reviewers by default; add reviewers or branch protection in repo settings when you want manual approval.
 
 If Cloudflare secrets are not set, the deploy job skips deployment cleanly. If secrets are set, the workflow runs `npx wrangler whoami` before deploy so bad account IDs or tokens fail with a clear preflight error.
+
+Third-party GitHub Actions are pinned to commit SHAs, with the source tag shown in comments. Refresh those SHAs deliberately when updating Actions versions.
 
 ## Runtime secrets
 

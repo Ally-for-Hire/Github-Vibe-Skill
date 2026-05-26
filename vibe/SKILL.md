@@ -7,7 +7,7 @@ description: Create and publish new GitHub repositories configured for secure Cl
 
 ## Overview
 
-Use this skill to scaffold a GitHub repository for a Cloudflare Worker with tests, a locked Wrangler toolchain, and a GitHub Actions workflow that deploys only from `main` or manual dispatch.
+Use this skill to scaffold a GitHub repository for a Cloudflare Worker with tests, a lockfile-backed Wrangler toolchain, and a GitHub Actions workflow that deploys only from `main` or manual dispatch.
 
 The bundled generator is the preferred path because it keeps secrets out of command history and makes live operations opt-in.
 
@@ -16,7 +16,7 @@ The bundled generator is the preferred path because it keeps secrets out of comm
 1. Gather the repository name, visibility, Worker name, and whether the user wants live GitHub operations now. Default to `private` visibility and a Worker name derived from the repository name.
 2. Generate files with `scripts/scaffold_worker_repo.py`.
 3. Run local validation in the generated project before creating or pushing the remote repo.
-4. If requested, create the GitHub repository with `gh` and push the initial scaffold.
+4. If requested, create the GitHub repository with `gh`. When secrets are requested in the same run, create the remote first, set secrets, then push so the first workflow can deploy.
 5. Configure GitHub Actions secrets through `gh secret set`, reading secret values from environment variables or hidden terminal prompts. Never ask the user to paste the Cloudflare API token into chat.
 
 ## Agent Behavior
@@ -96,7 +96,8 @@ Validate the skill scaffold:
 
 ```bash
 python -m unittest scripts/test_scaffold_worker_repo.py
-python C:/Users/dabes/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
+# Optional, when Codex's skill-creator validator is available locally:
+python path/to/quick_validate.py .
 ```
 
 Validate a generated Worker project:
